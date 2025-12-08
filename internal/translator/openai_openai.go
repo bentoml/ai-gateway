@@ -60,14 +60,24 @@ func (o *openAIToOpenAITranslatorV1ChatCompletion) RequestBody(original []byte, 
 	}
 	// Store the request model to use as fallback for response model
 	o.requestModel = req.Model
+	source := original
+
 	if o.modelNameOverride != "" {
 		// If modelName is set we override the model to be used for the request.
-		newBody, err = sjson.SetBytesOptions(original, "model", o.modelNameOverride, sjsonOptions)
+		newBody, err = sjson.SetBytesOptions(source, "model", o.modelNameOverride, sjsonOptions)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to set model name: %w", err)
 		}
 		// Make everything coherent.
 		o.requestModel = o.modelNameOverride
+		source = newBody
+	}
+
+	if req.Stream && len(source) > 0 && json.Valid(source) {
+		if newBody, err = sjson.SetBytesOptions(source, "stream_options.include_usage", true, sjsonOptions); err != nil {
+			return nil, nil, fmt.Errorf("failed to set stream_options.include_usage: %w", err)
+		}
+		source = newBody
 	}
 
 	// Always set the path header to the chat completions endpoint so that the request is routed correctly.
