@@ -317,6 +317,7 @@ func (c *GatewayController) reconcileFilterConfigSecret(
 			continue
 		}
 		hasEffectiveRoute = true
+		hostnames := hostnamesForAIGatewayRoute(aiGatewayRoute)
 		spec := aiGatewayRoute.Spec
 		for ruleIndex := range spec.Rules {
 			rule := &spec.Rules[ruleIndex]
@@ -329,11 +330,20 @@ func (c *GatewayController) reconcileFilterConfigSecret(
 					if (h.Type != nil && *h.Type != gwapiv1.HeaderMatchExact) || string(h.Name) != internalapi.ModelNameHeaderKeyDefault {
 						continue
 					}
-					ec.Models = append(ec.Models, filterapi.Model{
+					model := filterapi.Model{
 						Name:      h.Value,
 						CreatedAt: ptr.Deref[metav1.Time](rule.ModelsCreatedAt, aiGatewayRoute.CreationTimestamp).UTC(),
 						OwnedBy:   ptr.Deref(rule.ModelsOwnedBy, defaultOwnedBy),
-					})
+					}
+					ec.Models = append(ec.Models, model)
+					if len(hostnames) > 0 {
+						if ec.ModelsByHost == nil {
+							ec.ModelsByHost = make(map[string][]filterapi.Model)
+						}
+						for _, hn := range hostnames {
+							ec.ModelsByHost[hn] = append(ec.ModelsByHost[hn], model)
+						}
+					}
 				}
 			}
 			for backendRefIndex := range rule.BackendRefs {
@@ -575,6 +585,29 @@ func mcpConfig(mcpRoutes []aigv1a1.MCPRoute) (_ *filterapi.MCPConfig, hasEffecti
 		mc.Routes = append(mc.Routes, mcpRoute)
 	}
 	return mc, hasEffectiveRoute
+}
+
+// hostnamesForAIGatewayRoute extracts hostnames configured via the annotation used when generating HTTPRoute.
+// Hostnames are lowercased to align with Host/authority header matching.
+func hostnamesForAIGatewayRoute(aiGatewayRoute *aigv1a1.AIGatewayRoute) []string {
+	if aiGatewayRoute.Annotations == nil {
+		return nil
+	}
+	raw, ok := aiGatewayRoute.Annotations[aigatewayHTTPRouteHostnamesAnnotation]
+	if !ok || raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	hostnames := make([]string, 0, len(parts))
+	for _, p := range parts {
+		h := strings.TrimSpace(p)
+		if h == "" {
+			continue
+		}
+		hostnames = append(hostnames, strings.ToLower(h))
+	}
+	return hostnames
 }
 
 func (c *GatewayController) bspToFilterAPIBackendAuth(ctx context.Context, backendSecurityPolicy *aigv1a1.BackendSecurityPolicy) (*filterapi.BackendAuth, error) {
