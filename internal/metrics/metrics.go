@@ -128,8 +128,10 @@ type Metrics interface {
 
 // Factory is a closure that creates a new Metrics instance for a given operation.
 type Factory interface {
-	// NewMetrics creates a new Metrics instance for the specified operation name.
-	NewMetrics() Metrics
+	// NewMetrics creates a new Metrics instance. The originalHeaders parameter captures the
+	// original request headers before any mutations (e.g., key translation for upstream),
+	// allowing metrics to distinguish the client-provided header values from mutated ones.
+	NewMetrics(originalHeaders map[string]string) Metrics
 }
 
 // NewMetricsFactory returns a Factory to create a new Metrics instance.

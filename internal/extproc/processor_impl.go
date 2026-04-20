@@ -63,7 +63,7 @@ func NewFactory[ReqT any, RespT any, RespChunkT any, EndpointSpecT endpointspec.
 		if !isUpstreamFilter {
 			return newRouterProcessor[ReqT, RespT, RespChunkT, EndpointSpecT](config, requestHeaders, logger, tracer, enableRedaction), nil
 		}
-		return newUpstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT](requestHeaders, f.NewMetrics(), logger), nil
+		return newUpstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT](requestHeaders, f.NewMetrics(requestHeaders), logger), nil
 	}
 }
 
