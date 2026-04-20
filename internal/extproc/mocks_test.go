@@ -165,7 +165,7 @@ var _ extprocv3.ExternalProcessor_ProcessServer = &mockExternalProcessingStream{
 type mockMetricsFactory struct{}
 
 // NewMetrics implements [metrics.Factory.NewMetrics].
-func (m *mockMetricsFactory) NewMetrics() metrics.Metrics {
+func (m *mockMetricsFactory) NewMetrics(_ map[string]string) metrics.Metrics {
 	return &mockMetrics{}
 }
 

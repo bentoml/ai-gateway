@@ -24,8 +24,8 @@ type metricsImplFactory struct {
 }
 
 // NewMetrics implements [Factory.NewMetrics].
-func (f *metricsImplFactory) NewMetrics() Metrics {
-	return &metricsImpl{
+func (f *metricsImplFactory) NewMetrics(originalHeaders map[string]string) Metrics {
+	m := &metricsImpl{
 		metrics:                       f.metrics,
 		operation:                     f.operation,
 		originalModel:                 "unknown",
@@ -34,6 +34,15 @@ func (f *metricsImplFactory) NewMetrics() Metrics {
 		backend:                       "unknown",
 		requestHeaderAttributeMapping: f.requestHeaderAttributeMapping,
 	}
+	if len(originalHeaders) > 0 && len(f.requestHeaderAttributeMapping) > 0 {
+		m.originalRequestHeaders = make(map[string]string, len(f.requestHeaderAttributeMapping))
+		for headerName := range f.requestHeaderAttributeMapping {
+			if v, ok := originalHeaders[headerName]; ok {
+				m.originalRequestHeaders[headerName] = v
+			}
+		}
+	}
+	return m
 }
 
 // metricsImpl provides shared functionality for AI Gateway metrics implementations.
@@ -51,6 +60,11 @@ type metricsImpl struct {
 	responseModel                 string
 	backend                       string
 	requestHeaderAttributeMapping map[string]string // maps HTTP headers to metric attribute names.
+
+	// originalRequestHeaders stores the original request headers captured before any mutations
+	// (e.g., key translation for upstream). This allows metrics to report both the original
+	// client-provided header values and the mutated values sent to the upstream backend.
+	originalRequestHeaders map[string]string
 
 	// Fields for streaming token latency calculation, not used for non-streaming requests.
 
@@ -122,6 +136,14 @@ func (b *metricsImpl) buildBaseAttributes(headers map[string]string) attribute.S
 	for headerName, labelName := range b.requestHeaderAttributeMapping {
 		if headerValue, exists := headers[headerName]; exists {
 			attrs = append(attrs, attribute.Key(labelName).String(headerValue))
+		}
+		// Add the original (pre-mutation) header value with an "original-" prefix only when
+		// key translation actually changed the value, so metrics consumers can distinguish
+		// the client-provided key from the upstream key.
+		if origValue, exists := b.originalRequestHeaders[headerName]; exists {
+			if headerValue, curExists := headers[headerName]; curExists && headerValue != origValue {
+				attrs = append(attrs, attribute.Key("original-"+labelName).String(origValue))
+			}
 		}
 	}
 	return attribute.NewSet(attrs...)
