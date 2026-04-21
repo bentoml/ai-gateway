@@ -299,8 +299,8 @@ func TestHeaderLabelMappingWithKeyTranslation(t *testing.T) {
 	assert.Equal(t, uint64(1), count)
 }
 
-// TestHeaderLabelMappingWithoutKeyTranslation tests that when headers are NOT mutated,
-// no "original-" prefixed label is added to the metrics.
+// TestHeaderLabelMappingWithoutKeyTranslation tests that even when headers are NOT mutated,
+// the "original-" prefixed label is still added to metrics as long as original headers were captured.
 func TestHeaderLabelMappingWithoutKeyTranslation(t *testing.T) {
 	t.Parallel()
 
@@ -333,7 +333,7 @@ func TestHeaderLabelMappingWithoutKeyTranslation(t *testing.T) {
 		inputTokenSet: true, outputTokenSet: true, totalTokenSet: true,
 	}, requestHeaders)
 
-	// Without mutation, only the normal "api-key" label should exist — no "original-api-key".
+	// Even without mutation, both "api-key" and "original-api-key" should be present.
 	attrs := attribute.NewSet(
 		attribute.Key(genaiAttributeOperationName).String(string(GenAIOperationCompletion)),
 		attribute.Key(genaiAttributeProviderName).String(genaiProviderOpenAI),
@@ -342,6 +342,7 @@ func TestHeaderLabelMappingWithoutKeyTranslation(t *testing.T) {
 		attribute.Key(genaiAttributeResponseModel).String("test-model"),
 		attribute.Key(genaiAttributeTokenType).String(genaiTokenTypeInput),
 		attribute.Key("api-key").String("user-token-abc"),
+		attribute.Key("original-api-key").String("user-token-abc"),
 	)
 
 	count, _ := testotel.GetHistogramValues(t, mr, genaiMetricClientTokenUsage, attrs)
