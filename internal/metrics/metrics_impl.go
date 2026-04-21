@@ -137,13 +137,11 @@ func (b *metricsImpl) buildBaseAttributes(headers map[string]string) attribute.S
 		if headerValue, exists := headers[headerName]; exists {
 			attrs = append(attrs, attribute.Key(labelName).String(headerValue))
 		}
-		// Add the original (pre-mutation) header value with an "original-" prefix only when
-		// key translation actually changed the value, so metrics consumers can distinguish
-		// the client-provided key from the upstream key.
+		// Always add the original (pre-mutation) header value with an "original-" prefix
+		// when it was captured at initialization, so metrics consumers can identify the
+		// client-provided key regardless of whether key translation occurred.
 		if origValue, exists := b.originalRequestHeaders[headerName]; exists {
-			if headerValue, curExists := headers[headerName]; curExists && headerValue != origValue {
-				attrs = append(attrs, attribute.Key("original-"+labelName).String(origValue))
-			}
+			attrs = append(attrs, attribute.Key("original-"+labelName).String(origValue))
 		}
 	}
 	return attribute.NewSet(attrs...)
