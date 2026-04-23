@@ -44,6 +44,9 @@ type MCPRouteController struct {
 	logger logr.Logger
 	// gatewayEventChan is a channel to send events to the gateway controller.
 	gatewayEventChan chan event.GenericEvent
+	// managedClasses is the set of GatewayClass names this controller reconciles.
+	// Nil / empty means unfiltered.
+	managedClasses map[string]struct{}
 }
 
 // NewMCPRouteController creates a new reconcile.TypedReconciler[reconcile.Request] for the MCPRoute resource.
@@ -71,6 +74,12 @@ func (c *MCPRouteController) Reconcile(ctx context.Context, req reconcile.Reques
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	if !anyParentGatewayManaged(ctx, c.client, c.managedClasses, MCPRoute.Namespace, MCPRoute.Spec.ParentRefs) {
+		c.logger.V(1).Info("Skipping MCPRoute: no parentRef targets a managed GatewayClass",
+			"namespace", req.Namespace, "name", req.Name)
+		return ctrl.Result{}, nil
 	}
 
 	if err := c.syncMCPRoute(ctx, &MCPRoute); err != nil {

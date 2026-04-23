@@ -65,6 +65,9 @@ type AIGatewayRouteController struct {
 	rootPrefix string
 	// referenceGrantValidator validates cross-namespace references using ReferenceGrant.
 	referenceGrantValidator *referenceGrantValidator
+	// managedClasses is the set of GatewayClass names this controller reconciles.
+	// Nil / empty means unfiltered.
+	managedClasses map[string]struct{}
 }
 
 // NewAIGatewayRouteController creates a new reconcile.TypedReconciler[reconcile.Request] for the AIGatewayRoute resource.
@@ -95,6 +98,12 @@ func (c *AIGatewayRouteController) Reconcile(ctx context.Context, req reconcile.
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	if !anyParentGatewayManaged(ctx, c.client, c.managedClasses, aiGatewayRoute.Namespace, aiGatewayRoute.Spec.ParentRefs) {
+		c.logger.V(1).Info("Skipping AIGatewayRoute: no parentRef targets a managed GatewayClass",
+			"namespace", req.Namespace, "name", req.Name)
+		return ctrl.Result{}, nil
 	}
 
 	if err := c.syncAIGatewayRoute(ctx, &aiGatewayRoute); err != nil {

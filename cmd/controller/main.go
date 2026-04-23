@@ -65,6 +65,7 @@ type flags struct {
 	mcpSessionEncryptionIterations         int
 	mcpFallbackSessionEncryptionIterations int
 	watchNamespaces                        []string
+	gatewayClassNames                      []string
 	cacheSyncTimeout                       time.Duration
 }
 
@@ -212,6 +213,13 @@ func parseAndValidateFlags(args []string) (*flags, error) {
 		"",
 		"Comma-separated list of namespaces to watch. If not set, the controller watches all namespaces.",
 	)
+	gatewayClassNames := fs.String(
+		"gatewayClassNames",
+		"",
+		"Comma-separated list of GatewayClass names this controller instance manages. "+
+			"Only Gateways whose spec.gatewayClassName matches will be reconciled. "+
+			"If unset, all Gateways are reconciled (backward compatible for single-instance deployments).",
+	)
 	cacheSyncTimeout := fs.Duration(
 		"cacheSyncTimeout",
 		2*time.Minute, // This is the controller-runtime default
@@ -333,6 +341,7 @@ func parseAndValidateFlags(args []string) (*flags, error) {
 		extProcMaxRecvMsgSize:                  *extProcMaxRecvMsgSize,
 		maxRecvMsgSize:                         *maxRecvMsgSize,
 		watchNamespaces:                        parseWatchNamespaces(*watchNamespaces),
+		gatewayClassNames:                      parseWatchNamespaces(*gatewayClassNames),
 		cacheSyncTimeout:                       *cacheSyncTimeout,
 		mcpSessionEncryptionSeed:               *mcpSessionEncryptionSeed,
 		mcpFallbackSessionEncryptionSeed:       *mcpFallbackSessionEncryptionSeed,
@@ -360,6 +369,11 @@ func main() {
 	}
 
 	setupLog.Info("configuring kubernetes cache", "watch-namespaces", parsedFlags.watchNamespaces, "sync-timeout", parsedFlags.cacheSyncTimeout)
+	if len(parsedFlags.gatewayClassNames) > 0 {
+		setupLog.Info("gateway class filter enabled", "gatewayClassNames", parsedFlags.gatewayClassNames)
+	} else {
+		setupLog.Info("gateway class filter disabled (cluster-wide mode)")
+	}
 
 	ctx := ctrl.SetupSignalHandler()
 	pprof.Run(ctx)
@@ -433,6 +447,7 @@ func main() {
 		MCPSessionEncryptionIterations:         parsedFlags.mcpSessionEncryptionIterations,
 		MCPFallbackSessionEncryptionSeed:       parsedFlags.mcpFallbackSessionEncryptionSeed,
 		MCPFallbackSessionEncryptionIterations: parsedFlags.mcpFallbackSessionEncryptionIterations,
+		GatewayClassNames:                      parsedFlags.gatewayClassNames,
 	}); err != nil {
 		setupLog.Error(err, "failed to start controller")
 	}

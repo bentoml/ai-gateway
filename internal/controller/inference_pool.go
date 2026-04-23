@@ -34,6 +34,9 @@ type InferencePoolController struct {
 	kube                   kubernetes.Interface
 	logger                 logr.Logger
 	inferencePoolEventChan chan event.GenericEvent
+	// managedClasses is the set of GatewayClass names this controller reconciles.
+	// Nil / empty means unfiltered.
+	managedClasses map[string]struct{}
 }
 
 // NewInferencePoolController creates a new reconcile.TypedReconciler for gwaiev1.InferencePool.
@@ -62,6 +65,26 @@ func (c *InferencePoolController) Reconcile(ctx context.Context, req reconcile.R
 	}
 
 	c.logger.Info("Reconciling InferencePool", "namespace", req.Namespace, "name", req.Name)
+
+	if len(c.managedClasses) > 0 {
+		referenced, err := c.getReferencedGateways(ctx, &inferencePool)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		anyManaged := false
+		for _, gw := range referenced {
+			if gatewayInManagedClass(c.managedClasses, gw) {
+				anyManaged = true
+				break
+			}
+		}
+		if !anyManaged {
+			c.logger.V(1).Info("Skipping InferencePool: no referencing route targets a managed GatewayClass",
+				"namespace", req.Namespace, "name", req.Name)
+			return ctrl.Result{}, nil
+		}
+	}
+
 	if err := c.syncInferencePool(ctx, &inferencePool); err != nil {
 		c.logger.Error(err, "failed to sync InferencePool")
 		c.updateInferencePoolStatus(ctx, &inferencePool, "NotAccepted", err.Error())
