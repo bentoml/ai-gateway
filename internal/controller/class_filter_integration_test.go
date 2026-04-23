@@ -27,6 +27,32 @@ func routeKey(ns, name string) reconcile.Request {
 	return reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}}
 }
 
+func TestGatewayController_ClassFilter_EarlyReturn(t *testing.T) {
+	fakeClient := requireNewFakeClientWithIndexes(t)
+	c := NewGatewayController(fakeClient, fake2.NewClientset(), ctrl.Log, "extproc-image", "info", false, nil, true)
+	c.managedClasses = newManagedClasses([]string{"eg"})
+
+	gw := &gwapiv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw-b", Namespace: "default"},
+		Spec:       gwapiv1.GatewaySpec{GatewayClassName: "eg-b"},
+	}
+	require.NoError(t, fakeClient.Create(t.Context(), gw))
+
+	// Must early-return without writing the filter-config secret. A bypass here
+	// is exactly what caused prod-1 cross-slot clobber: AIGatewayRoute.syncGateways
+	// pushes Gateway events through WatchesRawSource which does not respect
+	// Builder.WithEventFilter predicates, so Reconcile entry is the one guard.
+	_, err := c.Reconcile(t.Context(), routeKey("default", "gw-b"))
+	require.NoError(t, err)
+
+	var secretList corev1.SecretList
+	require.NoError(t, fakeClient.List(t.Context(), &secretList))
+	for _, s := range secretList.Items {
+		require.NotEqual(t, FilterConfigSecretPerGatewayName("gw-b", "default"), s.Name,
+			"controller must not write a filter-config secret for an unmanaged Gateway")
+	}
+}
+
 func TestAIGatewayRouteController_ClassFilter_EarlyReturn(t *testing.T) {
 	fakeClient := requireNewFakeClientWithIndexes(t)
 	eventCh := internaltesting.NewControllerEventChan[*gwapiv1.Gateway]()

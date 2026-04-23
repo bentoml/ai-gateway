@@ -125,20 +125,12 @@ func StartControllers(ctx context.Context, mgr manager.Manager, config *rest.Con
 	}
 
 	managedClasses := newManagedClasses(options.GatewayClassNames)
-	classPredicate := predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		gw, ok := obj.(*gwapiv1.Gateway)
-		if !ok {
-			return true
-		}
-		return gatewayInManagedClass(managedClasses, gw)
-	})
 
 	gatewayEventChan := make(chan event.GenericEvent, 100)
 	gatewayC := NewGatewayController(c, kubernetes.NewForConfigOrDie(config),
 		logger.WithName("gateway"), options.ExtProcImage, options.ExtProcLogLevel, false, uuid.NewString, isKubernetes133OrLater(versionInfo, logger))
 	gatewayC.managedClasses = managedClasses
 	if err = TypedControllerBuilderForCRD(mgr, &gwapiv1.Gateway{}).
-		WithEventFilter(classPredicate).
 		WatchesRawSource(source.Channel(
 			gatewayEventChan,
 			&handler.EnqueueRequestForObject{},
