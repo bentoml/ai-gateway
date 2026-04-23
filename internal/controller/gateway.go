@@ -95,6 +95,16 @@ func (c *GatewayController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
+	// Class filter. A builder-level predicate would cover only the For() watch;
+	// channel events fed by AIGatewayRoute / MCPRoute / GatewayConfig via
+	// WatchesRawSource bypass global predicates (controller-runtime
+	// Builder.WatchesRawSource docs), so the filter has to live here.
+	if !gatewayInManagedClass(c.managedClasses, gw) {
+		c.logger.V(1).Info("Skipping Gateway: not in a managed GatewayClass",
+			"namespace", gw.Namespace, "name", gw.Name, "gatewayClassName", gw.Spec.GatewayClassName)
+		return ctrl.Result{}, nil
+	}
+
 	var aiRoutes aigv1a1.AIGatewayRouteList
 	err := c.client.List(ctx, &aiRoutes, client.MatchingFields{
 		k8sClientIndexAIGatewayRouteToAttachedGateway: fmt.Sprintf("%s.%s", req.Name, req.Namespace),
