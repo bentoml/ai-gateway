@@ -80,6 +80,9 @@ type GatewayController struct {
 	// Whether to run the extProc container as a sidecar (true) as a normal container (false).
 	// This is essentially a workaround for old k8s versions, and we can remove this in the future.
 	extProcAsSideCar bool
+	// managedClasses is the set of GatewayClass names this controller reconciles.
+	// Nil / empty means unfiltered (cluster-wide mode).
+	managedClasses map[string]struct{}
 }
 
 // Reconcile implements the reconcile.Reconciler for gwapiv1.Gateway.

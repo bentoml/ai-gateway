@@ -101,6 +101,10 @@ type Options struct {
 	MCPFallbackSessionEncryptionIterations int
 	// EndpointPrefixes is the comma-separated key-value pairs for endpoint prefixes.
 	EndpointPrefixes string
+	// GatewayClassNames is the list of GatewayClass names this controller instance manages.
+	// Only Gateways whose spec.gatewayClassName matches one of these names will be reconciled.
+	// An empty list disables filtering (backward compatible cluster-wide mode).
+	GatewayClassNames []string
 }
 
 // StartControllers starts the controllers for the AI Gateway.
@@ -120,10 +124,21 @@ func StartControllers(ctx context.Context, mgr manager.Manager, config *rest.Con
 		return fmt.Errorf("failed to get server version: %w", err)
 	}
 
+	managedClasses := newManagedClasses(options.GatewayClassNames)
+	classPredicate := predicate.NewPredicateFuncs(func(obj client.Object) bool {
+		gw, ok := obj.(*gwapiv1.Gateway)
+		if !ok {
+			return true
+		}
+		return gatewayInManagedClass(managedClasses, gw)
+	})
+
 	gatewayEventChan := make(chan event.GenericEvent, 100)
 	gatewayC := NewGatewayController(c, kubernetes.NewForConfigOrDie(config),
 		logger.WithName("gateway"), options.ExtProcImage, options.ExtProcLogLevel, false, uuid.NewString, isKubernetes133OrLater(versionInfo, logger))
+	gatewayC.managedClasses = managedClasses
 	if err = TypedControllerBuilderForCRD(mgr, &gwapiv1.Gateway{}).
+		WithEventFilter(classPredicate).
 		WatchesRawSource(source.Channel(
 			gatewayEventChan,
 			&handler.EnqueueRequestForObject{},
@@ -136,6 +151,7 @@ func StartControllers(ctx context.Context, mgr manager.Manager, config *rest.Con
 	routeC := NewAIGatewayRouteController(c, kubernetes.NewForConfigOrDie(config), logger.WithName("ai-gateway-route"),
 		gatewayEventChan, options.RootPrefix,
 	)
+	routeC.managedClasses = managedClasses
 	if err = TypedControllerBuilderForCRD(mgr, &aigv1a1.AIGatewayRoute{}).
 		Owns(&gwapiv1.HTTPRoute{}).
 		Owns(&egv1a1.HTTPRouteFilter{}).
@@ -190,6 +206,7 @@ func StartControllers(ctx context.Context, mgr manager.Manager, config *rest.Con
 		// CRD exists, create the controller.
 		inferencePoolC := NewInferencePoolController(c, kubernetes.NewForConfigOrDie(config), logger.
 			WithName("inference-pool"), inferencePoolEventChan)
+		inferencePoolC.managedClasses = managedClasses
 		if err = TypedControllerBuilderForCRD(mgr, &gwaiev1.InferencePool{}).
 			Watches(&gwapiv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(inferencePoolC.gatewayEventHandler)).
 			Watches(&aigv1a1.AIGatewayRoute{}, handler.EnqueueRequestsFromMapFunc(inferencePoolC.aiGatewayRouteEventHandler)).
@@ -215,6 +232,7 @@ func StartControllers(ctx context.Context, mgr manager.Manager, config *rest.Con
 	mcpRouteC := NewMCPRouteController(c, kubernetes.NewForConfigOrDie(config), logger.WithName("ai-gateway-mcp-route"),
 		gatewayEventChan,
 	)
+	mcpRouteC.managedClasses = managedClasses
 	if err = TypedControllerBuilderForCRD(mgr, &aigv1a1.MCPRoute{}).
 		Owns(&gwapiv1.HTTPRoute{}).
 		Owns(&egv1a1.Backend{}).
@@ -241,7 +259,7 @@ func StartControllers(ctx context.Context, mgr manager.Manager, config *rest.Con
 	}
 
 	if !options.DisableMutatingWebhook {
-		h := admission.WithCustomDefaulter(Scheme, &corev1.Pod{}, newGatewayMutator(c, kube,
+		mutator := newGatewayMutator(c, kube,
 			logger.WithName("gateway-mutator"),
 			options.ExtProcImage,
 			options.ExtProcImagePullPolicy,
@@ -262,7 +280,9 @@ func StartControllers(ctx context.Context, mgr manager.Manager, config *rest.Con
 			options.MCPSessionEncryptionIterations,
 			options.MCPFallbackSessionEncryptionSeed,
 			options.MCPFallbackSessionEncryptionIterations,
-		))
+		)
+		mutator.managedClasses = managedClasses
+		h := admission.WithCustomDefaulter(Scheme, &corev1.Pod{}, mutator)
 		mgr.GetWebhookServer().Register("/mutate", &webhook.Admission{Handler: h})
 	}
 

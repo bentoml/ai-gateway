@@ -63,6 +63,10 @@ type gatewayMutator struct {
 	// Whether to run the extProc container as a sidecar (true) as a normal container (false).
 	// This is essentially a workaround for old k8s versions, and we can remove this in the future.
 	extProcAsSideCar bool
+
+	// managedClasses is the set of GatewayClass names whose pods get extProc injected.
+	// Nil / empty means unfiltered.
+	managedClasses map[string]struct{}
 }
 
 func newGatewayMutator(c client.Client, kube kubernetes.Interface, logger logr.Logger,
@@ -129,6 +133,21 @@ func (g *gatewayMutator) Default(ctx context.Context, obj runtime.Object) error 
 		"pod_name", pod.Name, "pod_namespace", pod.Namespace,
 		"gateway_name", gatewayName, "gateway_namespace", gatewayNamespace,
 	)
+	if len(g.managedClasses) > 0 && gatewayName != "" {
+		var gw gwapiv1.Gateway
+		if err := g.c.Get(ctx, client.ObjectKey{Name: gatewayName, Namespace: gatewayNamespace}, &gw); err == nil {
+			if !gatewayInManagedClass(g.managedClasses, &gw) {
+				g.logger.V(1).Info("skipping pod: owning Gateway is not in a managed GatewayClass",
+					"pod_name", pod.Name, "gateway_class", gw.Spec.GatewayClassName)
+				return nil
+			}
+		} else if !apierrors.IsNotFound(err) {
+			g.logger.Error(err, "failed to resolve owning Gateway for class filter",
+				"gateway_name", gatewayName, "gateway_namespace", gatewayNamespace)
+		}
+		// On not-found, fall through to current behavior (mutate). The Gateway
+		// may not have been observed yet; better to inject than drop a real pod.
+	}
 	if err := g.mutatePod(ctx, pod, gatewayName, gatewayNamespace); err != nil {
 		g.logger.Error(err, "failed to mutate deployment", "name", pod.Name, "namespace", pod.Namespace)
 		return err

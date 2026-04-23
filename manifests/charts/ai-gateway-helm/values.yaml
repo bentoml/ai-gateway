@@ -115,6 +115,14 @@ controller:
     # Default is 2 minutes.
     cacheSyncTimeout: 2m
 
+  # GatewayClass names this controller instance manages. When set, only Gateways
+  # whose spec.gatewayClassName matches one of these names are reconciled.
+  # Intended for multi-instance deployments (e.g. blue/green dual-EG) so each
+  # ai-gateway controller owns a distinct slice of Gateways and does not clobber
+  # artifacts produced by its peer. Leave empty for single-instance deployments
+  # (backward compatible cluster-wide mode).
+  gatewayClassNames: []
+
   # -- Deployment configs --
   image:
     repository: docker.io/envoyproxy/ai-gateway-controller
