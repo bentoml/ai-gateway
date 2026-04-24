@@ -60,6 +60,7 @@ jobs:
       fail-fast: false
       matrix:
         image: [controller, extproc]
+        arch: [amd64, arm64]
         include:
           - arch: amd64
             runs-on: ubuntu-latest
@@ -83,12 +84,30 @@ jobs:
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_TOKEN }}
 
-      - name: Build and push per-arch image
+      - name: Build Go binary (native)
+        run: make build.${{ matrix.image }} GOOS_LIST=linux GOARCH_LIST=${{ matrix.arch }}
+
+      - name: Build and push image by digest
+        env:
+          REPO: ${{ env.OCI_REGISTRY }}/ai-gateway-${{ matrix.image }}
+          ARCH: ${{ matrix.arch }}
+          CMD: ${{ matrix.image }}
         run: |
-          make docker-build.${{ matrix.image }} \
-            OCI_REGISTRY="${{ env.OCI_REGISTRY }}" \
-            TAG="${{ needs.preflight.outputs.tag }}-${{ matrix.arch }}" \
-            DOCKER_BUILD_ARGS="--push"
+          mkdir -p /tmp/digests
+          docker buildx build . \
+            --platform "linux/${ARCH}" \
+            --build-arg "VARIANT=static" \
+            --build-arg "COMMAND_NAME=${CMD}" \
+            --output "type=image,name=${REPO},push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file /tmp/metadata.json
+          jq -r '."containerimage.digest"' /tmp/metadata.json > "/tmp/digests/${ARCH}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image }}-${{ matrix.arch }}
+          path: /tmp/digests/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
 
   image-manifest:
     needs: [preflight, images]
@@ -105,15 +124,23 @@ jobs:
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_TOKEN }}
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-${{ matrix.image }}-*
+          path: /tmp/digests
+          merge-multiple: true
+
       - name: Compose multi-arch manifest list
         env:
           TAG: ${{ needs.preflight.outputs.tag }}
-          IMG: ${{ env.OCI_REGISTRY }}/ai-gateway-${{ matrix.image }}
+          REPO: ${{ env.OCI_REGISTRY }}/ai-gateway-${{ matrix.image }}
         run: |
-          docker buildx imagetools create -t "${IMG}:${TAG}" \
-            "${IMG}:${TAG}-amd64" \
-            "${IMG}:${TAG}-arm64"
-          docker buildx imagetools inspect "${IMG}:${TAG}"
+          amd64=$(cat /tmp/digests/amd64)
+          arm64=$(cat /tmp/digests/arm64)
+          docker buildx imagetools create -t "${REPO}:${TAG}" \
+            "${REPO}@${amd64}" \
+            "${REPO}@${arm64}"
+          docker buildx imagetools inspect "${REPO}:${TAG}"
 
   chart:
     needs: [preflight, image-manifest]
