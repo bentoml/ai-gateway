@@ -109,6 +109,9 @@ type Metrics interface {
 	// SetBackend sets the selected backend when the routing decision has been made. This is usually called
 	// after parsing the request body to determine the model and invoke the routing logic.
 	SetBackend(backend *filterapi.Backend)
+	// SetOriginalRequestHeaders captures the original client request headers (from the router processor)
+	// so that metrics can report the client-provided header values via "original-" prefixed labels.
+	SetOriginalRequestHeaders(headers map[string]string)
 	// RecordRequestCompletion records the completion of the request, including success status.
 	RecordRequestCompletion(ctx context.Context, success bool, requestHeaders map[string]string)
 	// RecordTokenUsage records token usage metrics.
@@ -128,10 +131,8 @@ type Metrics interface {
 
 // Factory is a closure that creates a new Metrics instance for a given operation.
 type Factory interface {
-	// NewMetrics creates a new Metrics instance. The originalHeaders parameter captures the
-	// original request headers before any mutations (e.g., key translation for upstream),
-	// allowing metrics to distinguish the client-provided header values from mutated ones.
-	NewMetrics(originalHeaders map[string]string) Metrics
+	// NewMetrics creates a new Metrics instance.
+	NewMetrics() Metrics
 }
 
 // NewMetricsFactory returns a Factory to create a new Metrics instance.

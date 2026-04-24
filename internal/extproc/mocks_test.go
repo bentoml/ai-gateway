@@ -165,7 +165,7 @@ var _ extprocv3.ExternalProcessor_ProcessServer = &mockExternalProcessingStream{
 type mockMetricsFactory struct{}
 
 // NewMetrics implements [metrics.Factory.NewMetrics].
-func (m *mockMetricsFactory) NewMetrics(_ map[string]string) metrics.Metrics {
+func (m *mockMetricsFactory) NewMetrics() metrics.Metrics {
 	return &mockMetrics{}
 }
 
@@ -210,6 +210,8 @@ func (m *mockMetrics) SetResponseModel(responseModel internalapi.ResponseModel) 
 
 // SetBackend implements [metrics.Metrics].
 func (m *mockMetrics) SetBackend(backend *filterapi.Backend) { m.backend = backend.Name }
+
+func (m *mockMetrics) SetOriginalRequestHeaders(_ map[string]string) {}
 
 // RecordTokenUsage implements [metrics.Metrics].
 func (m *mockMetrics) RecordTokenUsage(_ context.Context, usage metrics.TokenUsage, _ map[string]string) {
