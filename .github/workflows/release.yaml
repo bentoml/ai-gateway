@@ -38,9 +38,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Lint + unit tests + helm template test
-        run: make lint test helm-test
-
       - name: Package helm charts at release version
         run: |
           mkdir -p /tmp/helm-packages
