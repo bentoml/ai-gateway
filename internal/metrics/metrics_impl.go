@@ -24,8 +24,8 @@ type metricsImplFactory struct {
 }
 
 // NewMetrics implements [Factory.NewMetrics].
-func (f *metricsImplFactory) NewMetrics(originalHeaders map[string]string) Metrics {
-	m := &metricsImpl{
+func (f *metricsImplFactory) NewMetrics() Metrics {
+	return &metricsImpl{
 		metrics:                       f.metrics,
 		operation:                     f.operation,
 		originalModel:                 "unknown",
@@ -34,15 +34,6 @@ func (f *metricsImplFactory) NewMetrics(originalHeaders map[string]string) Metri
 		backend:                       "unknown",
 		requestHeaderAttributeMapping: f.requestHeaderAttributeMapping,
 	}
-	if len(originalHeaders) > 0 && len(f.requestHeaderAttributeMapping) > 0 {
-		m.originalRequestHeaders = make(map[string]string, len(f.requestHeaderAttributeMapping))
-		for headerName := range f.requestHeaderAttributeMapping {
-			if v, ok := originalHeaders[headerName]; ok {
-				m.originalRequestHeaders[headerName] = v
-			}
-		}
-	}
-	return m
 }
 
 // metricsImpl provides shared functionality for AI Gateway metrics implementations.
@@ -72,6 +63,19 @@ type metricsImpl struct {
 	timeToFirstToken     time.Duration // Duration to first token.
 	interTokenLatencySec float64       // Average time per token after first, in seconds.
 	totalOutputTokens    uint32
+}
+
+// SetOriginalRequestHeaders implements [Metrics.SetOriginalRequestHeaders].
+func (b *metricsImpl) SetOriginalRequestHeaders(headers map[string]string) {
+	if len(headers) == 0 || len(b.requestHeaderAttributeMapping) == 0 {
+		return
+	}
+	b.originalRequestHeaders = make(map[string]string, len(b.requestHeaderAttributeMapping))
+	for headerName := range b.requestHeaderAttributeMapping {
+		if v, ok := headers[headerName]; ok {
+			b.originalRequestHeaders[headerName] = v
+		}
+	}
 }
 
 // StartRequest initializes timing for a new request.

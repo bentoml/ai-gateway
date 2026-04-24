@@ -63,7 +63,7 @@ func NewFactory[ReqT any, RespT any, RespChunkT any, EndpointSpecT endpointspec.
 		if !isUpstreamFilter {
 			return newRouterProcessor[ReqT, RespT, RespChunkT, EndpointSpecT](config, requestHeaders, logger, tracer, enableRedaction), nil
 		}
-		return newUpstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT](requestHeaders, f.NewMetrics(requestHeaders), logger), nil
+		return newUpstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT](requestHeaders, f.NewMetrics(), logger), nil
 	}
 }
 
@@ -369,6 +369,7 @@ func (u *upstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT]) ProcessReque
 			return nil, fmt.Errorf("failed to do auth request: %w", err)
 		}
 		for _, h := range hdrs {
+			u.requestHeaders[h.Key()] = h.Value()
 			headerMutation.SetHeaders = append(headerMutation.SetHeaders, &corev3.HeaderValueOption{
 				AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
 				Header:       &corev3.HeaderValue{Key: h.Key(), RawValue: []byte(h.Value())},
@@ -592,6 +593,7 @@ func (u *upstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT]) SetBackend(c
 	}
 	rp.upstreamFilter = u
 	u.parent = rp
+	u.metrics.SetOriginalRequestHeaders(rp.requestHeaders)
 
 	u.translator, err = u.parent.eh.GetTranslator(b.Schema, u.modelNameOverride)
 	if err != nil {
