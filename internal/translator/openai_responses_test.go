@@ -558,7 +558,7 @@ func TestResponses_HandleNonStreamingResponse(t *testing.T) {
 		require.Equal(t, uint32(0), cacheCreationTokens)
 	})
 
-	t.Run("invalid JSON", func(t *testing.T) {
+	t.Run("invalid JSON falls back to passthrough", func(t *testing.T) {
 		translator := NewResponsesOpenAIToOpenAITranslator("v1", "").(*openAIToOpenAITranslatorV1Responses)
 
 		req := &openai.ResponseRequest{
@@ -570,9 +570,11 @@ func TestResponses_HandleNonStreamingResponse(t *testing.T) {
 
 		invalidBody := bytes.NewReader([]byte(`{invalid json`))
 
-		_, _, _, _, err = translator.ResponseBody(nil, invalidBody, false, nil)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to unmarshal body")
+		newHeaders, newBody, _, responseModel, err := translator.ResponseBody(nil, invalidBody, false, nil)
+		require.NoError(t, err)
+		require.Nil(t, newHeaders)
+		require.Nil(t, newBody)
+		require.Equal(t, "gpt-4o", responseModel)
 	})
 }
 

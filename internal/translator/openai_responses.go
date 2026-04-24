@@ -118,8 +118,12 @@ func (o *openAIToOpenAITranslatorV1Responses) handleNonStreamingResponse(body io
 	newHeaders []internalapi.Header, newBody []byte, tokenUsage metrics.TokenUsage, responseModel string, err error,
 ) {
 	var resp openai.Response
-	if err := json.NewDecoder(body).Decode(&resp); err != nil {
-		return nil, nil, tokenUsage, responseModel, fmt.Errorf("failed to unmarshal body: %w", err)
+	if decodeErr := json.NewDecoder(body).Decode(&resp); decodeErr != nil {
+		// /responses is passthrough — image-gen and other non-strict-OpenAI backends
+		// return shapes the strict Response union unmarshaler rejects. Swallow so
+		// Envoy forwards the original body; metrics/tracing degrade gracefully.
+		responseModel = o.requestModel
+		return
 	}
 
 	// Fallback to request model for test or non-compliant OpenAI backends
