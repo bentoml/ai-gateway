@@ -142,7 +142,12 @@ type RouteRuleName string
 // besides that this abstracts the concept of a backend at Envoy Gateway level to a simple name.
 type Backend struct {
 	// Name of the backend including the route name as well as the route rule index.
-	Name              string                        `json:"name"`
+	Name string `json:"name"`
+	// RefName is the stable Envoy Gateway backend reference name (i.e., AIGatewayRouteRuleBackendRef.Name).
+	// Unlike Name, this value does not embed the AIGatewayRoute rule/ref index, so it remains stable
+	// across additions or removals of unrelated rules. Used as the backend identifier in metrics
+	// (gen_ai.backend.name) so downstream consumers (e.g., HPA) can attribute load to a specific upstream.
+	RefName           string                        `json:"refName,omitempty"`
 	ModelNameOverride internalapi.ModelNameOverride `json:"modelNameOverride"`
 	// Schema specifies the API schema of the output format of requests from.
 	Schema VersionedAPISchema `json:"schema"`

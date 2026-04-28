@@ -176,6 +176,7 @@ type mockMetrics struct {
 	requestModel                 string
 	responseModel                string
 	backend                      string
+	requestStartCount            int
 	requestSuccessCount          int
 	requestErrorCount            int
 	inputTokenCount              int
@@ -255,6 +256,11 @@ func (m *mockMetrics) GetInterTokenLatencyMs() float64 {
 	// Otherwise use the default behavior
 	m.interTokenLatency = 0.5
 	return m.interTokenLatency * 1000
+}
+
+// RecordRequestStart implements [metrics.Metrics].
+func (m *mockMetrics) RecordRequestStart(_ context.Context) {
+	m.requestStartCount++
 }
 
 // RecordRequestCompletion implements [metrics.Metrics].

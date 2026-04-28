@@ -724,6 +724,180 @@ func TestRecordTokenLatency_MultipleChunksFormula(t *testing.T) {
 	})
 }
 
+// TestRecordRequestStartCompletionPair_Success verifies that the active-requests gauge
+// returns to zero after a successful request: +1 on RecordRequestStart, -1 on RecordRequestCompletion.
+func TestRecordRequestStartCompletionPair_Success(t *testing.T) {
+	t.Parallel()
+	mr := metric.NewManualReader()
+	meter := metric.NewMeterProvider(metric.WithReader(mr)).Meter("test")
+	pm := NewMetricsFactory(meter, nil, GenAIOperationCompletion).NewMetrics().(*metricsImpl)
+
+	expected := attribute.NewSet(
+		attribute.Key(genaiAttributeOperationName).String(string(GenAIOperationCompletion)),
+		attribute.Key(genaiAttributeProviderName).String(genaiProviderOpenAI),
+		attribute.Key(genaiAttributeRequestModel).String("test-model"),
+		attribute.Key(genaiAttributeBackendName).String("backend-abc"),
+	)
+
+	pm.StartRequest(nil)
+	pm.SetRequestModel("test-model")
+	pm.SetBackend(&filterapi.Backend{
+		Schema:  filterapi.VersionedAPISchema{Name: filterapi.APISchemaOpenAI},
+		RefName: "backend-abc",
+	})
+	pm.RecordRequestStart(t.Context())
+
+	v, ok := getInt64SumValue(t, mr, genaiMetricClientRequestsActive, expected)
+	require.True(t, ok)
+	assert.Equal(t, int64(1), v)
+
+	pm.RecordRequestCompletion(t.Context(), true, nil)
+	v, ok = getInt64SumValue(t, mr, genaiMetricClientRequestsActive, expected)
+	require.True(t, ok)
+	assert.Equal(t, int64(0), v, "+1 and -1 should net to 0 on success")
+}
+
+// TestRecordRequestStartCompletionPair_Failure verifies that the active-requests gauge nets
+// to zero on a failed request and the existing request_duration histogram still records the failure.
+func TestRecordRequestStartCompletionPair_Failure(t *testing.T) {
+	t.Parallel()
+	mr := metric.NewManualReader()
+	meter := metric.NewMeterProvider(metric.WithReader(mr)).Meter("test")
+	pm := NewMetricsFactory(meter, nil, GenAIOperationCompletion).NewMetrics().(*metricsImpl)
+
+	gaugeAttrs := attribute.NewSet(
+		attribute.Key(genaiAttributeOperationName).String(string(GenAIOperationCompletion)),
+		attribute.Key(genaiAttributeProviderName).String(genaiProviderOpenAI),
+		attribute.Key(genaiAttributeRequestModel).String("test-model"),
+		attribute.Key(genaiAttributeBackendName).String("backend-abc"),
+	)
+	histAttrs := attribute.NewSet(
+		attribute.Key(genaiAttributeOperationName).String(string(GenAIOperationCompletion)),
+		attribute.Key(genaiAttributeProviderName).String(genaiProviderOpenAI),
+		attribute.Key(genaiAttributeOriginalModel).String("unknown"),
+		attribute.Key(genaiAttributeRequestModel).String("test-model"),
+		attribute.Key(genaiAttributeResponseModel).String("unknown"),
+		attribute.Key(genaiAttributeErrorType).String(genaiErrorTypeFallback),
+	)
+
+	pm.StartRequest(nil)
+	pm.SetRequestModel("test-model")
+	pm.SetBackend(&filterapi.Backend{
+		Schema:  filterapi.VersionedAPISchema{Name: filterapi.APISchemaOpenAI},
+		RefName: "backend-abc",
+	})
+	pm.RecordRequestStart(t.Context())
+	pm.RecordRequestCompletion(t.Context(), false, nil)
+
+	v, ok := getInt64SumValue(t, mr, genaiMetricClientRequestsActive, gaugeAttrs)
+	require.True(t, ok)
+	assert.Equal(t, int64(0), v, "+1 and -1 should net to 0 on failure")
+
+	count, _ := testotel.GetHistogramValues(t, mr, genaiMetricServerRequestDuration, histAttrs)
+	assert.Equal(t, uint64(1), count, "failure should still record the request duration histogram with error.type")
+}
+
+// TestRecordRequestCompletionWithoutStart_NoUnderflow verifies that calling
+// RecordRequestCompletion without a preceding RecordRequestStart does NOT emit -1
+// (i.e., no underflow on the gauge for early failure paths like SetBackend errors).
+func TestRecordRequestCompletionWithoutStart_NoUnderflow(t *testing.T) {
+	t.Parallel()
+	mr := metric.NewManualReader()
+	meter := metric.NewMeterProvider(metric.WithReader(mr)).Meter("test")
+	pm := NewMetricsFactory(meter, nil, GenAIOperationCompletion).NewMetrics().(*metricsImpl)
+
+	pm.StartRequest(nil)
+	pm.SetRequestModel("test-model")
+	pm.SetBackend(&filterapi.Backend{
+		Schema:  filterapi.VersionedAPISchema{Name: filterapi.APISchemaOpenAI},
+		RefName: "backend-abc",
+	})
+	// Intentionally skip RecordRequestStart to simulate an early failure path.
+	pm.RecordRequestCompletion(t.Context(), false, nil)
+
+	var data metricdata.ResourceMetrics
+	require.NoError(t, mr.Collect(t.Context(), &data))
+	for _, sm := range data.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			assert.NotEqualf(t, genaiMetricClientRequestsActive, m.Name,
+				"active-requests gauge should have no datapoints when RecordRequestStart was never called")
+		}
+	}
+}
+
+// TestRecordRequestStart_AttributeStability verifies that mutations to model/backend fields
+// after RecordRequestStart do NOT affect the -1 emitted by RecordRequestCompletion: both must
+// land on the same series (otherwise gauge underflow appears in one series and an orphan +1 in another).
+func TestRecordRequestStart_AttributeStability(t *testing.T) {
+	t.Parallel()
+	mr := metric.NewManualReader()
+	meter := metric.NewMeterProvider(metric.WithReader(mr)).Meter("test")
+	pm := NewMetricsFactory(meter, nil, GenAIOperationCompletion).NewMetrics().(*metricsImpl)
+
+	pinned := attribute.NewSet(
+		attribute.Key(genaiAttributeOperationName).String(string(GenAIOperationCompletion)),
+		attribute.Key(genaiAttributeProviderName).String(genaiProviderOpenAI),
+		attribute.Key(genaiAttributeRequestModel).String("test-model"),
+		attribute.Key(genaiAttributeBackendName).String("backend-abc"),
+	)
+
+	pm.StartRequest(nil)
+	pm.SetRequestModel("test-model")
+	pm.SetBackend(&filterapi.Backend{
+		Schema:  filterapi.VersionedAPISchema{Name: filterapi.APISchemaOpenAI},
+		RefName: "backend-abc",
+	})
+	pm.RecordRequestStart(t.Context())
+
+	// Mutate fields the gauge attribute set covers, after +1 was emitted.
+	pm.SetRequestModel("mutated-model")
+	pm.SetBackend(&filterapi.Backend{
+		Schema:  filterapi.VersionedAPISchema{Name: filterapi.APISchemaAWSBedrock},
+		RefName: "backend-different",
+	})
+
+	pm.RecordRequestCompletion(t.Context(), true, nil)
+
+	v, ok := getInt64SumValue(t, mr, genaiMetricClientRequestsActive, pinned)
+	require.True(t, ok, "datapoint must exist on the originally-pinned attribute set")
+	assert.Equal(t, int64(0), v, "-1 must land on the pinned series so net is 0")
+
+	// And there must be no datapoint on the mutated attribute set.
+	mutated := attribute.NewSet(
+		attribute.Key(genaiAttributeOperationName).String(string(GenAIOperationCompletion)),
+		attribute.Key(genaiAttributeProviderName).String(genaiProviderAWSBedrock),
+		attribute.Key(genaiAttributeRequestModel).String("mutated-model"),
+		attribute.Key(genaiAttributeBackendName).String("backend-different"),
+	)
+	if v, ok := getInt64SumValue(t, mr, genaiMetricClientRequestsActive, mutated); ok {
+		assert.Equal(t, int64(0), v, "no series should leak under the mutated attribute set")
+	}
+}
+
+// getInt64SumValue returns the value of an Int64 Sum (UpDownCounter) datapoint with the given
+// attributes, or (0, false) if no datapoint exists for that attribute set.
+func getInt64SumValue(t *testing.T, reader metric.Reader, metricName string, attrs attribute.Set) (int64, bool) {
+	var data metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(t.Context(), &data))
+	for _, sm := range data.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != metricName {
+				continue
+			}
+			d, ok := m.Data.(metricdata.Sum[int64])
+			if !ok {
+				continue
+			}
+			for _, dp := range d.DataPoints {
+				if dp.Attributes.Equals(&attrs) {
+					return dp.Value, true
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
 func TestSetBackendProviderName(t *testing.T) {
 	t.Parallel()
 
