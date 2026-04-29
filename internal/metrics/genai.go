@@ -12,6 +12,7 @@ const (
 	// See: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/
 
 	genaiMetricClientTokenUsage         = "gen_ai.client.token.usage" //nolint:gosec // metric name, not credential
+	genaiMetricClientRequestsActive     = "gen_ai.client.requests.active"
 	genaiMetricServerRequestDuration    = "gen_ai.server.request.duration"
 	genaiMetricServerTimeToFirstToken   = "gen_ai.server.time_to_first_token"   //nolint:gosec // metric name, not credential
 	genaiMetricServerTimePerOutputToken = "gen_ai.server.time_per_output_token" //nolint:gosec // metric name, not credential
@@ -21,6 +22,7 @@ const (
 	genaiAttributeOriginalModel = "gen_ai.original.model"
 	genaiAttributeRequestModel  = "gen_ai.request.model"
 	genaiAttributeResponseModel = "gen_ai.response.model"
+	genaiAttributeBackendName   = "gen_ai.backend.name"
 	genaiAttributeTokenType     = "gen_ai.token.type" //nolint:gosec // metric name, not credential
 	genaiAttributeErrorType     = "error.type"
 
@@ -79,6 +81,9 @@ type genAI struct {
 	// Calculated by: (request_duration - time_to_first_token) / (output_tokens - 1)
 	// See: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/#metric-gen_aiservertime_per_output_token
 	outputTokenLatency metric.Float64Histogram
+	// requestsActive is the number of in-flight client requests, attributed by request model and
+	// the backend reference name (stable EG Backend identifier). Intended to drive HPA on upstreams.
+	requestsActive metric.Int64UpDownCounter
 }
 
 // newGenAI creates a new genAI metrics instance.
@@ -107,6 +112,11 @@ func newGenAI(meter metric.Meter) *genAI {
 			metric.WithDescription("Time per output token generated after the first token for successful responses."),
 			metric.WithUnit("s"),
 			metric.WithExplicitBucketBoundaries(0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 2.5),
+		),
+		requestsActive: mustRegisterInt64UpDownCounter(meter,
+			genaiMetricClientRequestsActive,
+			metric.WithDescription("Number of in-flight generative AI client requests, attributed by request model and backend."),
+			metric.WithUnit("{request}"),
 		),
 	}
 }

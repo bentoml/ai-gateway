@@ -32,6 +32,7 @@ func (f *metricsImplFactory) NewMetrics() Metrics {
 		requestModel:                  "unknown",
 		responseModel:                 "unknown",
 		backend:                       "unknown",
+		backendRefName:                "unknown",
 		requestHeaderAttributeMapping: f.requestHeaderAttributeMapping,
 	}
 }
@@ -48,8 +49,20 @@ type metricsImpl struct {
 	// requestModel is the original model from the request body.
 	requestModel string
 	// responseModel is the model that ultimately generated the response (may differ due to backend override).
-	responseModel                 string
-	backend                       string
+	responseModel string
+	backend       string
+	// backendRefName is the stable EG-level backend reference name (filterapi.Backend.RefName).
+	// Used as the gen_ai.backend.name attribute so metrics can be attributed to a specific upstream
+	// independent of route rule/ref index ordering.
+	backendRefName string
+	// inFlightRecorded tracks whether the +1 on the active-requests gauge has been emitted.
+	// RecordRequestCompletion uses this to ensure the matching -1 is only emitted when paired,
+	// avoiding gauge underflow on early failures (e.g., SetBackend error before RecordRequestStart).
+	inFlightRecorded bool
+	// inFlightAttrs is the attribute set captured at RecordRequestStart so the matching -1 in
+	// RecordRequestCompletion is recorded on the same series even if request/backend fields are
+	// mutated later.
+	inFlightAttrs                 attribute.Set
 	requestHeaderAttributeMapping map[string]string // maps HTTP headers to metric attribute names.
 
 	// originalRequestHeaders stores the original request headers captured before any mutations
@@ -122,6 +135,9 @@ func (b *metricsImpl) SetBackend(backend *filterapi.Backend) {
 	default:
 		b.backend = backend.Name
 	}
+	if backend.RefName != "" {
+		b.backendRefName = backend.RefName
+	}
 }
 
 // buildBaseAttributes creates the base attributes for metrics recording.
@@ -151,8 +167,34 @@ func (b *metricsImpl) buildBaseAttributes(headers map[string]string) attribute.S
 	return attribute.NewSet(attrs...)
 }
 
+// buildActiveRequestsAttributes builds the slim attribute set for the in-flight requests gauge.
+// Excludes original/response model and error.type because those are not yet known at +1 time,
+// and matching the same set on -1 is required to avoid gauge underflow.
+func (b *metricsImpl) buildActiveRequestsAttributes() attribute.Set {
+	return attribute.NewSet(
+		attribute.Key(genaiAttributeOperationName).String(b.operation),
+		attribute.Key(genaiAttributeProviderName).String(b.backend),
+		attribute.Key(genaiAttributeRequestModel).String(b.requestModel),
+		attribute.Key(genaiAttributeBackendName).String(b.backendRefName),
+	)
+}
+
+// RecordRequestStart implements [Metrics.RecordRequestStart].
+func (b *metricsImpl) RecordRequestStart(ctx context.Context) {
+	if b.inFlightRecorded {
+		return
+	}
+	b.inFlightAttrs = b.buildActiveRequestsAttributes()
+	b.metrics.requestsActive.Add(ctx, 1, metric.WithAttributeSet(b.inFlightAttrs))
+	b.inFlightRecorded = true
+}
+
 // RecordRequestCompletion records the completion of a request with success/failure status.
 func (b *metricsImpl) RecordRequestCompletion(ctx context.Context, success bool, requestHeaders map[string]string) {
+	if b.inFlightRecorded {
+		b.metrics.requestsActive.Add(ctx, -1, metric.WithAttributeSet(b.inFlightAttrs))
+		b.inFlightRecorded = false
+	}
 	attrs := b.buildBaseAttributes(requestHeaders)
 
 	if success {

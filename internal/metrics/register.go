@@ -24,3 +24,12 @@ func mustRegisterHistogram(meter metric.Meter, name string, options ...metric.Fl
 	}
 	return h
 }
+
+// mustRegisterInt64UpDownCounter registers an Int64UpDownCounter with the meter and panics if it fails.
+func mustRegisterInt64UpDownCounter(meter metric.Meter, name string, options ...metric.Int64UpDownCounterOption) metric.Int64UpDownCounter {
+	h, err := meter.Int64UpDownCounter(name, options...)
+	if err != nil {
+		panic(err)
+	}
+	return h
+}

@@ -315,6 +315,10 @@ func (u *upstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT]) ProcessReque
 	// Set the request model for metrics from the original model or override if applied.
 	reqModel := cmp.Or(u.requestHeaders[internalapi.ModelNameHeaderKeyDefault], u.parent.originalModel)
 	u.metrics.SetRequestModel(reqModel)
+	// Mark the request as in-flight on the active-requests gauge. SetBackend has already been called
+	// by the router path, so request_model + backend_name attributes are both set. The matching -1
+	// is emitted by RecordRequestCompletion in the success/failure paths below.
+	u.metrics.RecordRequestStart(ctx)
 
 	// We force the body mutation in the following cases:
 	// * The request is a retry request because the body mutation might have happened the previous iteration.

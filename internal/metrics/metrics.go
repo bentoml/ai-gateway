@@ -112,7 +112,12 @@ type Metrics interface {
 	// SetOriginalRequestHeaders captures the original client request headers (from the router processor)
 	// so that metrics can report the client-provided header values via "original-" prefixed labels.
 	SetOriginalRequestHeaders(headers map[string]string)
+	// RecordRequestStart marks the request as in-flight (+1 on the active-requests gauge).
+	// Must be called once after the request model and backend have been resolved.
+	// The matching -1 happens in RecordRequestCompletion.
+	RecordRequestStart(ctx context.Context)
 	// RecordRequestCompletion records the completion of the request, including success status.
+	// Also emits -1 on the active-requests gauge if RecordRequestStart was previously called.
 	RecordRequestCompletion(ctx context.Context, success bool, requestHeaders map[string]string)
 	// RecordTokenUsage records token usage metrics.
 	//
